@@ -1,0 +1,229 @@
+---
+title: 'Projet : Apprentissage non supervisée'
+author: "Gouarab Fatima Ezzahrae"
+date: "2023-03-22"
+output:
+  html_document: default
+  word_document: default
+---
+
+# Partie 1 : Traitement de données 
+
+```{r, echo = FALSE}
+library(visdat) #visualisation des NA
+library(NbClust)
+library(factoextra)
+library(FactoMineR)
+library(tidyverse)
+library(dplyr)
+library(ggcorrplot)
+library(ggplot2)
+library(dendextend)
+library(cluster)
+library(plotly)
+```
+
+# Importation des données : 
+
+```{r }
+Pays_donnees <- read.csv("Pays_donnees.csv", header =  TRUE, )
+dim(Pays_donnees) #168 *10
+
+```
+
+# Analyse exploratoire 
+
+## Traitement de données 
+
+Pour aborder les données manquantes dans notre analyse, nous avons choisi d'utiliser la bibliothèque "visdat" dès le début de notre processus.
+
+```{r, echo = TRUE}
+visdat::vis_miss(Pays_donnees) 
+
+```
+Étant donné que nous avons vérifié notre ensemble de données,
+il n'y a pas de valeurs manquantes (les données sont 100 % présentes), ce qui signifie que nous pouvons poursuivre notre analyse sans avoir à effectuer de modifications ou à traiter des données manquantes.
+
+*Isolation de la variable "pays" des autres variables qualitatives.
+
+```{r}
+data   = Pays_donnees[,-1]
+pays = Pays_donnees[,1]
+summary(Pays_donnees[,-1])
+
+```
+```{r}
+boxplot(data)
+```
+
+
+D'aprés la sortie du résumé (Summary) et le graphique des boxplot , Les variables ne sont pas toutes mesurées dans la même unité (a priori) et prennent des valeurs relativement peu variables : il est forcément nécessaires de standardiser les données.
+ 
+Nous pouvons voir des valeurs aberrantes sur la plupart des variables. Nous avons  décidé de conserver ces valeurs aberrantes car elles représentent probablement des pays en très mauvaise situation et pourraient être éligibles à une aide financière.
+
+## Standarisation des données 
+
+```{r}
+data_scale <- scale(data)
+
+```
+
+## Relation entre les variables 
+```{r}
+# Calculer la matrice de corrélation
+corr <- round(cor(data_scale), 1)
+# Visualization of our matrix
+ggcorrplot(corr, type = 'upper', outline.col = "white",
+          colors = c("#1679a1", "white", "#f8766d"),
+          lab = TRUE)
+```
+D'après l'analyse du corrélogramme, il est clair que certaines variables du jeu de données sont fortement corrélées. En effet, une forte corrélation positive de 0,9 est observée entre les variables revenu et pib_h, ainsi qu'entre les variables fert et enfant_mort, et entre les variables exports et imports avec une corrélation de 0,7. En revanche, une forte corrélation négative de -0,9 est constatée entre l'espérance de vie et la mortalité infantile, et une forte corrélation négative de -0,8 est observée entre l'espérance de vie et la fécondité. Ces résultats mettent en évidence l'existence de relations étroites entre ces variables, qui peuvent être utilisées pour orienter les politiques de développement et les interventions en santé publique dans les pays concernés.
+
+
+# Algorithmes 
+
+# Classification Ascendante Hiérarchique (CAH)
+
+On applique une CAH sur ces données avec la distance euclidienne et la stratégie d'agrégation de Ward.
+
+```{r}
+d <- dist(data_scale) # dissimilarité 
+cah.ward <- hclust(d, method = "ward.D")
+```
+
+Visualisation de dendogramme 
+
+```{r}
+plot(cah.ward,hang = -1)
+```
+
+ En observant le dendrogramme, nous avons constaté que les regroupements de données sont majoritairement effectués à une hauteur peu élevée, ce qui suggère l'existence d'une structure "naturelle" des groupes. Nous avons également examiné la courbe de perte d'inertie qui indique la quantité d'information perdue en fonction du nombre de groupes. Pour éviter de noyer l'information importante, nous avons limité la visualisation aux 20 premières valeurs.
+
+```{r}
+plot(rev(cah.ward$height)[1:20],type="b")
+```
+L'analyse du coude a indiqué que le nombre optimal de groupes se situe entre 3 et 5. Par conséquent, la décision finale quant au nombre de clusters à utiliser est subjective et nécessite une interprétation. Pour cette analyse, nous avons choisi d'utiliser 3 clusters pour les variables continues, mais les résultats seront examinés ultérieurement pour vérifier la validité de cette décision.
+
+On peut aussi s'aider de critères automatiques calculés dans le package `NbClust`
+
+```{r}
+NbClust(data_scale,min.nc = 2,max.nc = 15,method="ward.D",index="all")
+```
+
+Représentation du dendrogramme avec les différents groupes obtenus.
+
+```{r}
+# Nombre de groupes
+K <- 3
+dend <- as.dendrogram(cah.ward)
+
+dend <- dend %>%
+color_branches(k = 3) %>%
+  set("branches_lwd", c(0.5,1,1.1)) %>%
+  set("branches_lty", c(1,2,1))
+
+plot(dend)
+
+
+```
+
+## Algorithme Kmeans
+
+Dans cette partie , Nous allons utiliser l'algorithme K-means pour regrouper les observations en clusters homogènes en minimisant la distance entre les observations et leur centroïde associé. Cela se fait de manière itérative en trouvant les centroïdes, en attribuant chaque observation à son centroïde le plus proche, et en répétant le processus jusqu'à convergence.
+On préfèrera utiliser l'option `nstart` du kmeans pour stabiliser les résultats. En relançant le code plusieurs fois, on observe que les résultats sont stables .
+
+```{r}
+#Kmeans avec K =3 , 4 , 5 
+kmeans3= kmeans(data_scale,3, nstart = 100)
+kmeans4 <- kmeans(data_scale, centers = 4,nstart=100) 
+kmeans5 <- kmeans(data_scale, centers = 5,nstart=100) 
+```
+
+Visualisation des clusters 
+
+
+```{r}
+g1 <- fviz_cluster(kmeans3, geom = "point", data = data_scale) + ggtitle("k = 3") + theme_bw()
+plot(g1)
+
+g2 <- fviz_cluster(kmeans4, geom = "point", data = data_scale) + ggtitle("k = 4") + theme_bw()
+plot(g2)
+g3 <- fviz_cluster(kmeans5, geom = "point", data = data_scale) + ggtitle("k = 5") + theme_bw()
+plot(g3)
+```
+
+
+En observant les graphiques montrant la répartition des pays en utilisant l'analyse k-means avec differentes k, il semble qu'il n'y ait pas de différences marquantes entre les résultats obtenus avec 3 à 6 clusters. Cependant, pour notre analyse, nous avons choisi de travailler avec seulement 3 clusters. Afin de déterminer les pays qui nécessitent une aide, une analyse statistique plus approfondie sur ces clusters est nécessaire.
+
+```{r}
+clust3_data <- kmeans3$cluster # Saving saperate the cluster component
+data_kmeans3 <- Pays_donnees
+data_kmeans3$group_kmeans <- clust3_data
+```
+Dans cette partie, nous avons réalisé une analyse de clustering en utilisant l'algorithme k-means avec un nombre de clusters égal à 3. Nous avons ensuite extrait les clusters obtenus pour les ajouter à notre jeu de données d'origine. Cette étape nous permet d'étudier les caractéristiques des différents groupes identifiés.
+
+
+Nous allons maintenant procéder à cette analyse pour déterminer quels pays ont besoin d'une aide économique en fonction des caractéristiques de leur groupe de clustering.
+
+```{r}
+mean_data_kmeans <- data_kmeans3 %>%
+  group_by(group_kmeans) %>%
+  summarise(across(enfant_mort:pib_h, mean))
+  
+mean_data_kmeans
+```
+Sans aucun doute, le cluster numéro 2 est est le plus critique en termes de besoins de développement, selon les caractéristiques suivantes :
+
+** Mortalité infantile moyenne : 92,96170
+** Espérance de vie moyenne : 59,18723 
+** PIB moyen : 1922,383 
+** Revenu : 3942.404
+
+Ces quatre indicateurs soulignent la gravité de la situation dans ce cluster. Ces données mettent en évidence l'urgence d'une intervention ciblée pour aider les pays de ce groupe à améliorer leurs conditions de vie et de développement.
+
+
+```{r}
+
+ggplotly( ggplot(data_kmeans3, aes(x = enfant_mort, y = revenu, color = factor(group_kmeans))) + 
+  geom_point() +
+  scale_color_discrete(name = "Cluster ID") +
+  xlab("Enfant_mort") +
+  ylab("Revenu"))
+```
+
+```{r}
+Pays_donnees$esper_vie
+ggplotly( ggplot(data_kmeans3, aes(x = esper_vie, y = revenu, color = factor(group_kmeans))) + 
+  geom_point() +
+  scale_color_discrete(name = "Cluster ID") +
+  xlab("esper_vie") +
+  ylab("Revenu"))
+```
+
+
+```{r}
+ggplot(data_kmeans3, aes(x = enfant_mort, y = pib_h, color = factor(group_kmeans))) + 
+  geom_point() +
+  scale_color_discrete(name = "Cluster ID") +
+  xlab("pib_h") +
+  ylab("pib_h")
+```
+
+# Listes des Pays 
+
+En prenant en compte les différentes variables socio-économiques des pays, il est possible de déterminer avec précision les pays qui nécessitent une aide financière. Les indicateurs tels que la mortalité infantile, l'espérance de vie moyenne, le PIB moyen et le revenu ont été choisis en fonction des résultats de l'étude statistique préliminaire (corrélogramme), qui permet d'identifier les pays confrontés aux défis les plus urgents en matière de santé et qui ont besoin d'une aide financière immédiate. Dans le cas du cluster numéro 2, caractérisé par une forte mortalité infantile et une diminution des autres indicateurs, nous avons identifié les 20 pays les plus affectés et recommandons de leur octroyer une priorité pour l'obtention de l'aide financière.
+
+```{r}
+#filtration de groupe 3
+group3 <- filter(data_kmeans3, group_kmeans == 2)
+group3
+```
+
+```{r}
+sorted_data <- group3 %>% arrange(desc(enfant_mort),revenu,pib_h, esper_vie)
+#les 10 des Pays plus besion 
+p_besoin <- sorted_data[1:10,]$pays
+p_besoin
+```
+
+
